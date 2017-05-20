@@ -19,11 +19,11 @@ import qualified Data.Conduit.Text            as CT
 import           Data.Foldable                (notElem)
 import qualified Data.Map                     as M
 import qualified Data.Set                     as S
+import           Data.String                  (IsString (..))
 import qualified Data.String.HT               as UHT
 import qualified Data.Text                    as T
 import qualified Data.Text.Buildable
-import           Data.Text.Lazy.Builder       (Builder)
-import           Formatting                   (bprint, build, sformat, stext, string, (%))
+import           Formatting                   (bprint, build, sformat, stext, (%))
 import           Prelude                      ()
 import qualified System.Console.ANSI          as ANSI
 import           Universum
@@ -72,14 +72,16 @@ data ConvertedFeatureInfo
     | forall r. Read r => CModify Text (r -> Int)
     | CClasses [Text]
 
-withColor' :: (ANSI.ColorIntensity, ANSI.Color) -> Builder -> Builder
-withColor' (intensity, color) text =
-    bprint (string%build%string)
-    (ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground intensity color])
-    text
-    (ANSI.setSGRCode [ANSI.Reset])
+withColor' :: (IsString s, Monoid s) => (ANSI.ColorIntensity, ANSI.Color) -> s -> s
+withColor' (intensity, color) text = mconcat
+    [ fromString $
+      ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground intensity color]
+    , text
+    , fromString $
+      ANSI.setSGRCode [ANSI.Reset]
+    ]
 
-withColor :: ANSI.Color -> Builder -> Builder
+withColor :: (IsString s, Monoid s) => ANSI.Color -> s -> s
 withColor color = withColor' (ANSI.Vivid, color)
 
 instance Buildable ConvertedFeatureInfo where
@@ -103,7 +105,7 @@ classes, unset, discard, numeric :: FeatureInfo
 classes = Classes mempty
 unset   = Ignore False
 discard = Ignore True
-numeric = Modify "Remain as is" identity
+numeric = Modify (withColor ANSI.Green "Remain as is") identity
 
 featuresTable :: M.Map Text FeatureInfo
 featuresTable = M.fromList
@@ -205,7 +207,7 @@ convertFeatures infos = do
     putStrLn @Text "Process classes as following:"
     forM_ (zip (columns header) infos) $ \(hentry, info) ->
         putStrLn $ sformat (build%": "%build) hentry info
-    
+
     putStrLn @Text "Converting..."
     C.awaitForever . convertLine $ fmap (map (sformat build)) . convertFeatureValue
     putStrLn @Text "Done"
