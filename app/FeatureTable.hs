@@ -21,10 +21,10 @@ numeric = Modify (Color.withColor' (Color.Dull, Color.Green) "Remain as is")
 
 featuresTable :: M.Map Text FeatureInfo
 featuresTable = M.fromList
-    [ -- gemeral
+    [ -- general
       "color"                     >: classes
     , "genres"                    >: classes
-    , "duration"                  >: discard
+    , "duration"                  >: unset
     , "movie_title"               >: discard
 
       -- statistics
@@ -56,5 +56,6 @@ featuresTable = M.fromList
     , "imdb_score"                >: Modify "Multiply by 10"
                                      (\(k :: Double) -> round $ k * 10)
     , "content_rating"            >: classes
+    , "title_year"                >: Ranges [2000, 2010]
     ]
 

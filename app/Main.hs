@@ -85,7 +85,7 @@ convertFeatures infos = do
         putStrLn $ sformat (build%": "%build) hentry info
 
     putStrLn @Text "Converting..."
-    C.awaitForever . convertLine $ fmap (map (sformat build)) . convertFeatureValue
+    C.awaitForever . convertLine $ map (sformat build) ... convertFeatureValue
     putStrLn @Text "Done"
       where
         convertLine converter =
