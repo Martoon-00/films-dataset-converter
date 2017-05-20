@@ -18,6 +18,7 @@ executable converter
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:       attoparsec
+                     , ansi-terminal
                      , base
                      , bytestring
                      , conduit

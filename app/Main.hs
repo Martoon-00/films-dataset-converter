@@ -20,8 +20,10 @@ import qualified Data.Set                     as S
 import qualified Data.String.HT               as UHT
 import qualified Data.Text                    as T
 import qualified Data.Text.Buildable
-import           Formatting                   (bprint, build, sformat, stext, (%))
+import           Data.Text.Lazy.Builder       (Builder)
+import           Formatting                   (bprint, build, sformat, stext, string, (%))
 import           Prelude                      ()
+import qualified System.Console.ANSI          as ANSI
 import           Universum
 
 main :: IO ()
@@ -66,13 +68,24 @@ data ConvertedFeatureInfo
     | CNumeric         -- ^ don't modify
     | CClasses [Text]  -- ^ several features, each for some class from list
 
+withColor' :: (ANSI.ColorIntensity, ANSI.Color) -> Builder -> Builder
+withColor' (intensity, color) text =
+    bprint (string%build%string)
+    (ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground intensity color])
+    text
+    (ANSI.setSGRCode [ANSI.Reset])
+
+withColor :: ANSI.Color -> Builder -> Builder
+withColor color = withColor' (ANSI.Vivid, color)
+
 instance Buildable ConvertedFeatureInfo where
-    build CUnset   = "Not specified"
-    build CIgnore  = "Dropped"
-    build CNumeric = "Leave as is"
+    build CUnset   = withColor ANSI.Red "Not specified"
+    build CIgnore  = withColor ANSI.Magenta "Dropped"
+    build CNumeric = withColor ANSI.Blue "Leave as is"
     build (CClasses cls) =
         let limit = 20
-        in  bprint (build%" classes: " %stext%stext)
+        in  withColor' (ANSI.Dull, ANSI.White) $
+            bprint (build%" classes: " %stext%stext)
                 (length cls)
                 (T.intercalate "," $ sformat build . explicitEmpty <$> take limit cls)
                 (if length cls > limit then "..." else "")
@@ -82,9 +95,11 @@ instance Buildable ConvertedFeatureInfo where
 
 featuresTable :: M.Map Text FeatureInfo
 featuresTable = M.fromList
-    [ "color"                  >: Classes mempty
-    , "director_name"          >: Ignore
-    , "num_critic_for_reviews" >: Numeric
+    [ "color"                   >: Classes mempty
+    , "director_name"           >: Ignore
+    , "num_critic_for_reviews"  >: Numeric
+    , "duration"                >: Ignore
+    , "director_facebook_likes" >: Numeric
     ]
 
 considerValue :: FeatureInfo -> Text -> FeatureInfo
