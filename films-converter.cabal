@@ -28,6 +28,7 @@ executable films-converter-exe
                      , mtl
                      , resourcet
                      , text
+                     , text-format
                      , universum
   default-language:    Haskell2010
   default-extensions:  OverloadedStrings
