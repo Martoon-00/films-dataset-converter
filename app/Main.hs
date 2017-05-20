@@ -205,8 +205,10 @@ convertFeatures infos = do
     putStrLn @Text "Process classes as following:"
     forM_ (zip (columns header) infos) $ \(hentry, info) ->
         putStrLn $ sformat (build%": "%build) hentry info
-
+    
+    putStrLn @Text "Converting..."
     C.awaitForever . convertLine $ fmap (map (sformat build)) . convertFeatureValue
+    putStrLn @Text "Done"
       where
         convertLine converter =
             C.yield . T.intercalate " " . concat . zipWith converter infos . columns
