@@ -1,6 +1,8 @@
-{-# LANGUAGE LambdaCase       #-}
-{-# LANGUAGE Rank2Types       #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE LambdaCase                #-}
+{-# LANGUAGE Rank2Types                #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TypeApplications          #-}
 
 module Main where
 
@@ -57,16 +59,18 @@ explicitEmpty "" = "<empty>"
 explicitEmpty t  = t
 
 data FeatureInfo
-    = Unset                 -- ^ way to process feature is not specified
-    | Ignore                -- ^ forced ignore
-    | Numeric               -- ^ value remains as is
-    | Classes (S.Set Text)  -- ^ feature gets splitted to several binary features
+    = Ignore Bool
+    -- ^ don't include this feature into result,
+    --   argument determines whether is was excluded manually
+    | forall r. Read r => Modify Text (r -> Int)
+    -- ^ value is to be modified
+    | Classes (S.Set Text)
+    -- ^ feature gets splitted to several binary features
 
 data ConvertedFeatureInfo
-    = CUnset           -- ^ way to process feature is not specified
-    | CIgnore          -- ^ way to process feature is not specified
-    | CNumeric         -- ^ don't modify
-    | CClasses [Text]  -- ^ several features, each for some class from list
+    = CIgnore Bool
+    | forall r. Read r => CModify Text (r -> Int)
+    | CClasses [Text]
 
 withColor' :: (ANSI.ColorIntensity, ANSI.Color) -> Builder -> Builder
 withColor' (intensity, color) text =
@@ -79,53 +83,87 @@ withColor :: ANSI.Color -> Builder -> Builder
 withColor color = withColor' (ANSI.Vivid, color)
 
 instance Buildable ConvertedFeatureInfo where
-    build CUnset   = withColor ANSI.Red "Not specified"
-    build CIgnore  = withColor ANSI.Magenta "Dropped"
-    build CNumeric = withColor ANSI.Blue "Leave as is"
+    build (CIgnore byUser) =
+        if byUser
+        then withColor ANSI.Magenta "Discarded"
+        else withColor ANSI.Red "Not specified"
+    build (CModify desc _)  = withColor ANSI.Blue $ bprint stext desc
     build (CClasses cls) =
         let limit = 20
         in  withColor' (ANSI.Dull, ANSI.White) $
             bprint (build%" classes: " %stext%stext)
                 (length cls)
-                (T.intercalate "," $ sformat build . explicitEmpty <$> take limit cls)
-                (if length cls > limit then "..." else "")
+                (T.intercalate ", " $ sformat build . explicitEmpty <$> take limit cls)
+                (if length cls > limit then ", ..." else "")
 
 (>:) :: a -> b -> (a, b)
 (>:) = (,)
 
+classes, unset, discard, numeric :: FeatureInfo
+classes = Classes mempty
+unset   = Ignore False
+discard = Ignore True
+numeric = Modify "Remain as is" identity
+
 featuresTable :: M.Map Text FeatureInfo
 featuresTable = M.fromList
-    [ "color"                   >: Classes mempty
-    , "director_name"           >: Ignore
-    , "num_critic_for_reviews"  >: Numeric
-    , "duration"                >: Ignore
-    , "director_facebook_likes" >: Numeric
+    [ -- gemeral
+      "color"                     >: classes
+    , "genres"                    >: classes
+    , "duration"                  >: discard
+    , "movie_title"               >: discard
+
+      -- statistics
+    , "gross"                     >: numeric
+    , "budget"                    >: numeric
+    , "num_critic_for_reviews"    >: numeric
+    , "num_user_for_reviews"      >: numeric
+    , "num_voted_users"           >: numeric
+    , "director_facebook_likes"   >: numeric
+    , "actor_1_facebook_likes"    >: numeric
+    , "actor_2_facebook_likes"    >: numeric
+    , "actor_3_facebook_likes"    >: numeric
+    , "cast_total_facebook_likes" >: numeric
+    , "movie_facebook_likes"      >: numeric
+
+      -- participants
+    , "director_name"             >: discard
+    , "actor_1_name"              >: discard
+    , "actor_2_name"              >: discard
+    , "actor_3_name"              >: discard
+
+      -- misc
+    , "plot_keywords"             >: discard
+    , "facenumber_in_poster"      >: classes
+    , "movie_imdb_link"           >: discard
+    , "language"                  >: classes
+    , "country"                   >: classes
+    , "aspect_ratio"              >: classes
+    , "imdb_score"                >: Modify "Multiply by 10"
+                                     (\(k :: Double) -> round $ k * 10)
+    , "content_rating"            >: classes
     ]
 
 considerValue :: FeatureInfo -> Text -> FeatureInfo
-considerValue Unset        _ = Unset
-considerValue Ignore       _ = Ignore
+considerValue i@Ignore{}   _ = i
 considerValue (Classes cl) t = Classes $ foldr S.insert cl $ T.splitOn "|" t
-considerValue Numeric      _ = Numeric
+considerValue (Modify d f) _ = Modify d f
 
 convertFeatureInfo :: MonadIO m => FeatureInfo -> m ConvertedFeatureInfo
-convertFeatureInfo Unset        = return CUnset
-convertFeatureInfo Ignore       = return CIgnore
-convertFeatureInfo Numeric      = return CNumeric
+convertFeatureInfo (Ignore b)   = return (CIgnore b)
+convertFeatureInfo (Modify d f) = return (CModify d f)
 convertFeatureInfo (Classes cl) = return (CClasses $ S.toList cl)
 
 convertFeatureName :: ConvertedFeatureInfo -> Text -> [Text]
-convertFeatureName CUnset         _ = []
-convertFeatureName CIgnore        _ = []
-convertFeatureName CNumeric       n = [n]
-convertFeatureName (CClasses cls) n = cls <&> flip (sformat $ build%"_"%build) n
+convertFeatureName CIgnore{}      _ = []
+convertFeatureName (CModify _ _)  n = [n]
+convertFeatureName (CClasses cls) n = cls <&> flip (sformat $ build%" ("%build%")") n
 
 convertFeatureValue :: ConvertedFeatureInfo -> Text -> [Int]
-convertFeatureValue CUnset   _  = []
-convertFeatureValue CIgnore  _  = []
-convertFeatureValue CNumeric "" = [0]
-convertFeatureValue CNumeric t  =
-    pure . fromMaybe (error $ "Bad number " <> t) $ readMaybe (toString t)
+convertFeatureValue CIgnore{}     _  = []
+convertFeatureValue (CModify _ _) "" = [0]
+convertFeatureValue (CModify _ f) t  =
+    pure . f . fromMaybe (error $ "Bad number " <> t) $ readMaybe (toString t)
 convertFeatureValue (CClasses cls) t =
     let cur = S.fromList $ T.splitOn "|" t
     in  cls <&> fromEnum . (`S.member` cur)
@@ -139,14 +177,11 @@ columns t =
     item = Atto.char '"' *> many (Atto.satisfy (/= '"')) <* Atto.char '"'
        <|> many (Atto.satisfy (`notElem` [',', '"']))
 
-uncolumns :: [Text] -> Text
-uncolumns = T.intercalate ","
-
 readLines :: (MonadIO m, MonadThrow m) => Consumer Text m [FeatureInfo]
 readLines = do
     header <- C.await `whenNothingM` error "Empty table"
     let features = columns header <&> \name ->
-          fromMaybe Unset $ M.lookup (T.toLower name) featuresTable
+          fromMaybe unset $ M.lookup (T.toLower name) featuresTable
     let featuresNum = length $ columns header
 
     (_, res) <- CL.execStateC (2 :: Int, features) . C.awaitForever $ \line -> do
@@ -165,7 +200,7 @@ readLines = do
 convertFeatures :: (MonadIO m) => [ConvertedFeatureInfo] -> Conduit Text m Text
 convertFeatures infos = do
     header <- C.await `whenNothingM` error "Empty table"
-    convertLine convertFeatureName header
+    -- convertLine convertFeatureName header
 
     putStrLn @Text "Process classes as following:"
     forM_ (zip (columns header) infos) $ \(hentry, info) ->
@@ -174,5 +209,5 @@ convertFeatures infos = do
     C.awaitForever . convertLine $ fmap (map (sformat build)) . convertFeatureValue
       where
         convertLine converter =
-            C.yield . uncolumns . concat . zipWith converter infos . columns
+            C.yield . T.intercalate " " . concat . zipWith converter infos . columns
 
