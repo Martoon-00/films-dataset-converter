@@ -5,16 +5,19 @@
 module Main where
 
 import qualified Conduit                      as CC
+import           Control.Lens                 ((.=), (<<+=))
 import           Control.Monad.Catch          (Exception, throwM)
-import           Control.Monad.State          (get, put)
 import           Control.Monad.Trans.Resource (runResourceT)
+import qualified Data.Attoparsec.Text         as Atto
 import           Data.Conduit                 (Conduit, Consumer, ($$), (=$=))
 import qualified Data.Conduit                 as C
 import qualified Data.Conduit.Binary          as CB
 import qualified Data.Conduit.Lift            as CL
 import qualified Data.Conduit.Text            as CT
+import           Data.Foldable                (notElem)
 import qualified Data.Map                     as M
 import qualified Data.Set                     as S
+import qualified Data.String.HT               as UHT
 import qualified Data.Text                    as T
 import qualified Data.Text.Buildable
 import           Formatting                   (bprint, build, sformat, stext, (%))
@@ -47,23 +50,32 @@ data LolException = LolException Text
 
 instance Exception LolException
 
+explicitEmpty :: Text -> Text
+explicitEmpty "" = "<empty>"
+explicitEmpty t  = t
+
 data FeatureInfo
     = Unset                 -- ^ way to process feature is not specified
+    | Ignore                -- ^ forced ignore
     | Numeric               -- ^ value remains as is
     | Classes (S.Set Text)  -- ^ feature gets splitted to several binary features
 
-
 data ConvertedFeatureInfo
     = CUnset           -- ^ way to process feature is not specified
-    | CLeave            -- ^ don't modify
+    | CIgnore          -- ^ way to process feature is not specified
+    | CNumeric         -- ^ don't modify
     | CClasses [Text]  -- ^ several features, each for some class from list
 
 instance Buildable ConvertedFeatureInfo where
-    build CLeave = "Leave as is"
+    build CUnset   = "Not specified"
+    build CIgnore  = "Dropped"
+    build CNumeric = "Leave as is"
     build (CClasses cls) =
-        bprint ("Classes: " %stext) $
-        T.intercalate "," $ sformat build <$> cls
-    build CUnset = "Not specified"
+        let limit = 20
+        in  bprint (build%" classes: " %stext%stext)
+                (length cls)
+                (T.intercalate "," $ sformat build . explicitEmpty <$> take limit cls)
+                (if length cls > limit then "..." else "")
 
 (>:) :: a -> b -> (a, b)
 (>:) = (,)
@@ -71,35 +83,46 @@ instance Buildable ConvertedFeatureInfo where
 featuresTable :: M.Map Text FeatureInfo
 featuresTable = M.fromList
     [ "color"                  >: Classes mempty
-    , "director_name"          >: Classes mempty
+    , "director_name"          >: Ignore
     , "num_critic_for_reviews" >: Numeric
     ]
 
 considerValue :: FeatureInfo -> Text -> FeatureInfo
 considerValue Unset        _ = Unset
+considerValue Ignore       _ = Ignore
 considerValue (Classes cl) t = Classes $ foldr S.insert cl $ T.splitOn "|" t
 considerValue Numeric      _ = Numeric
 
 convertFeatureInfo :: MonadIO m => FeatureInfo -> m ConvertedFeatureInfo
 convertFeatureInfo Unset        = return CUnset
-convertFeatureInfo Numeric      = return CLeave
+convertFeatureInfo Ignore       = return CIgnore
+convertFeatureInfo Numeric      = return CNumeric
 convertFeatureInfo (Classes cl) = return (CClasses $ S.toList cl)
 
 convertFeatureName :: ConvertedFeatureInfo -> Text -> [Text]
 convertFeatureName CUnset         _ = []
-convertFeatureName CLeave         n = [n]
+convertFeatureName CIgnore        _ = []
+convertFeatureName CNumeric       n = [n]
 convertFeatureName (CClasses cls) n = cls <&> flip (sformat $ build%"_"%build) n
 
 convertFeatureValue :: ConvertedFeatureInfo -> Text -> [Int]
-convertFeatureValue CUnset _ = []
-convertFeatureValue CLeave t =
-    fromMaybe (error $ "Bad number " <> t) $ readMaybe (toString t)
+convertFeatureValue CUnset   _  = []
+convertFeatureValue CIgnore  _  = []
+convertFeatureValue CNumeric "" = [0]
+convertFeatureValue CNumeric t  =
+    pure . fromMaybe (error $ "Bad number " <> t) $ readMaybe (toString t)
 convertFeatureValue (CClasses cls) t =
     let cur = S.fromList $ T.splitOn "|" t
     in  cls <&> fromEnum . (`S.member` cur)
 
 columns :: Text -> [Text]
-columns = T.splitOn ","
+columns t =
+    either (error $ "Failed to split into columns: " <> t) identity $
+    flip Atto.parseOnly t $
+    (`Atto.sepBy` Atto.string ",") (toText . UHT.trim <$> item) <* Atto.endOfInput
+  where
+    item = Atto.char '"' *> many (Atto.satisfy (/= '"')) <* Atto.char '"'
+       <|> many (Atto.satisfy (`notElem` [',', '"']))
 
 uncolumns :: [Text] -> Text
 uncolumns = T.intercalate ","
@@ -109,14 +132,20 @@ readLines = do
     header <- C.await `whenNothingM` error "Empty table"
     let features = columns header <&> \name ->
           fromMaybe Unset $ M.lookup (T.toLower name) featuresTable
+    let featuresNum = length $ columns header
 
-
-    CL.execStateC features . C.awaitForever $ \line -> do
+    (_, res) <- CL.execStateC (2 :: Int, features) . C.awaitForever $ \line -> do
+        lineNum <- _1 <<+= 1
         let entries = columns line
-        featuresInfo <- get
-        when (length features /= length entries) $
-            throwM $ LolException "Columns number mismatch"
-        put $ zipWith considerValue featuresInfo entries
+        featuresInfo <- gets snd
+        when (featuresNum /= length entries) $
+            throwM $ LolException $
+            sformat ("Columns number mismatch (line "%build%"): \
+                     \expected "%build%", got "%build)
+                     lineNum featuresNum (length entries)
+        lift $ _2 .= zipWith considerValue featuresInfo entries
+
+    return res
 
 convertFeatures :: (MonadIO m) => [ConvertedFeatureInfo] -> Conduit Text m Text
 convertFeatures infos = do
@@ -125,7 +154,7 @@ convertFeatures infos = do
 
     putStrLn @Text "Process classes as following:"
     forM_ (zip (columns header) infos) $ \(hentry, info) ->
-        putStrLn $ sformat ("For "%build%": "%build) hentry info
+        putStrLn $ sformat (build%": "%build) hentry info
 
     C.awaitForever . convertLine $ fmap (map (sformat build)) . convertFeatureValue
       where
