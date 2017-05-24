@@ -59,3 +59,6 @@ featuresTable = M.fromList
     , "title_year"                >: Ranges [2000, 2010]
     ]
 
+-- | Feature which represents 'Y' set and should be placed at last position
+lastFeature :: Text
+lastFeature = "imdb_score"
