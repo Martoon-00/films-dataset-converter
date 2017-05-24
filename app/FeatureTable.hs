@@ -10,11 +10,14 @@ import           Feature   (FeatureInfo (..))
 
 
 classes, unset, discard, numeric :: FeatureInfo
-classes = Classes mempty
+classes = Classes mempty 0
 unset   = Ignore False
 discard = Ignore True
 numeric = Modify (Color.withColor' (Color.Dull, Color.Green) "Remain as is")
                   identity
+
+mainClasses :: Int -> FeatureInfo
+mainClasses = Classes mempty
 
 (>:) :: a -> b -> (a, b)
 (>:) = (,)
@@ -23,7 +26,7 @@ featuresTable :: M.Map Text FeatureInfo
 featuresTable = M.fromList
     [ -- general
       "color"                     >: classes
-    , "genres"                    >: classes
+    , "genres"                    >: mainClasses 96
     , "duration"                  >: unset
     , "movie_title"               >: discard
 
@@ -50,12 +53,12 @@ featuresTable = M.fromList
     , "plot_keywords"             >: discard
     , "facenumber_in_poster"      >: classes
     , "movie_imdb_link"           >: discard
-    , "language"                  >: classes
-    , "country"                   >: classes
-    , "aspect_ratio"              >: classes
+    , "language"                  >: mainClasses 10
+    , "country"                   >: mainClasses 100
+    , "aspect_ratio"              >: discard
     , "imdb_score"                >: Modify "Multiply by 10"
                                      (\(k :: Double) -> round $ k * 10)
-    , "content_rating"            >: classes
+    , "content_rating"            >: mainClasses 50
     , "title_year"                >: Ranges [2000, 2010]
     ]
 
