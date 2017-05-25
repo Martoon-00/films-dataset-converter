@@ -72,9 +72,9 @@ convertFeatureName (Ranges _)      n = [n]
 convertFeatureValue :: FeatureInfo -> Text -> [Int]
 convertFeatureValue Ignore{}     _  = []
 convertFeatureValue (Modify _ f) t  = pure . f . fromMaybe 0 $ readNumber t
-convertFeatureValue (Classes cls _) t = do
+convertFeatureValue (Classes cls mb) t = do
     let cur = S.fromList $ T.splitOn "|" t
-    M.keys cls <&> fromEnum . (`S.member` cur)
+    M.keys (mergeClasses mb cls) <&> fromEnum . (`S.member` cur)
 convertFeatureValue (Ranges rng) t =
     let value   = readNumber t
         rangeNo = fromMaybe (-1) $ value <&> \v -> length . fst $ span ( < v) rng

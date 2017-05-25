@@ -51,7 +51,7 @@ featuresTable = M.fromList
 
       -- misc
     , "plot_keywords"             >: discard
-    , "facenumber_in_poster"      >: classes
+    , "facenumber_in_poster"      >: discard
     , "movie_imdb_link"           >: discard
     , "language"                  >: mainClasses 10
     , "country"                   >: mainClasses 100
