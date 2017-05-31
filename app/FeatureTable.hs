@@ -33,24 +33,24 @@ featuresTable = M.fromList
       -- statistics
     , "gross"                     >: numeric
     , "budget"                    >: numeric
-    , "num_critic_for_reviews"    >: numeric
-    , "num_user_for_reviews"      >: numeric
+    , "num_critic_for_reviews"    >: discard
+    , "num_user_for_reviews"      >: discard
     , "num_voted_users"           >: numeric
     , "director_facebook_likes"   >: numeric
-    , "actor_1_facebook_likes"    >: numeric
-    , "actor_2_facebook_likes"    >: numeric
-    , "actor_3_facebook_likes"    >: numeric
-    , "cast_total_facebook_likes" >: numeric
-    , "movie_facebook_likes"      >: numeric
+    , "actor_1_facebook_likes"    >: discard
+    , "actor_2_facebook_likes"    >: discard
+    , "actor_3_facebook_likes"    >: discard
+    , "cast_total_facebook_likes" >: discard
+    , "movie_facebook_likes"      >: discard
 
       -- participants
-    , "director_name"             >: discard
-    , "actor_1_name"              >: discard
-    , "actor_2_name"              >: discard
-    , "actor_3_name"              >: discard
+    , "director_name"             >: mainClasses 10
+    , "actor_1_name"              >: mainClasses 15
+    , "actor_2_name"              >: mainClasses 10
+    , "actor_3_name"              >: mainClasses 5
 
       -- misc
-    , "plot_keywords"             >: discard
+    , "plot_keywords"             >: mainClasses 10
     , "facenumber_in_poster"      >: discard
     , "movie_imdb_link"           >: discard
     , "language"                  >: mainClasses 10
